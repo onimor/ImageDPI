@@ -2,100 +2,107 @@
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using static System.Console;
 
-class Program
+namespace MyExif
 {
-    static void Main(string[] args)
+    class Program
     {
-        if (args.Length != 2)
+        static void Main(string[] args)
         {
-            Console.WriteLine("Использование: MyExif.exe <original_image> <translated_image>");
-            Console.ReadLine();
-            return;
-        }
-
-        string path1 = args[0];
-        string path2 = args[1];
-
-        if (!File.Exists(path1) || !File.Exists(path2))
-        {
-            Console.WriteLine("Один или оба указанных файла не существуют.");
-            Console.ReadLine();
-            return;
-        }
-
-        try
-        {
-            using (Image img1 = Image.FromFile(path1))
-            using (Image img2 = Image.FromFile(path2))
+            if (args.Length != 2)
             {
-                Image originalImage, translatedImage;
-                string originalPath, translatedPath;
+                WriteLine("Использование: MyExif.exe <original_image> <translated_image>");
+                ReadLine();
+                return;
+            }
 
-                // Определим оригинал по размеру
-                if (img1.Width >= img2.Width)
+            string path1 = args[0];
+            string path2 = args[1];
+
+            if (!File.Exists(path1) || !File.Exists(path2))
+            {
+                WriteLine("Один или оба указанных файла не существуют.");
+                ReadLine();
+                return;
+            }
+
+            try
+            {
+                using (Image img1 = Image.FromFile(path1))
+                using (Image img2 = Image.FromFile(path2))
                 {
-                    originalImage = img1;
-                    translatedImage = img2;
-                    originalPath = path1;
-                    translatedPath = path2;
+                    bool isImg1Original = img1.Width >= img2.Width;
+                    Image original = isImg1Original ? img1 : img2;
+                    Image translated = isImg1Original ? img2 : img1;
+                    string translatedPath = isImg1Original ? path2 : path1;
+
+                    float origDpi = original.HorizontalResolution;
+                    int origWidth = original.Width, origHeight = original.Height;
+                    float origWidthMm = PixelsToMillimeters(origWidth, origDpi);
+                    float origHeightMm = PixelsToMillimeters(origHeight, origDpi);
+
+                    float transDpi = translated.HorizontalResolution;
+                    int transWidth = translated.Width, transHeight = translated.Height;
+                    float transWidthMm = PixelsToMillimeters(transWidth, transDpi);
+                    float transHeightMm = PixelsToMillimeters(transHeight, transDpi);
+
+                    WriteLine("\nОригинал:");
+                    PrintImageInfo(origDpi, origWidth, origHeight, origWidthMm, origHeightMm);
+
+                    WriteLine("\nПереведённое:");
+                    PrintImageInfo(transDpi, transWidth, transHeight, transWidthMm, transHeightMm);
+
+                    float newDpi = origDpi * transWidth / (float)origWidth;
+
+                    string ext = Path.GetExtension(translatedPath).ToLower();
+                    ImageFormat format = (ext == ".jpg" || ext == ".jpeg") ? ImageFormat.Jpeg : ImageFormat.Png;
+                    string outPath = Path.Combine(
+                        Path.GetDirectoryName(translatedPath),
+                        Path.GetFileNameWithoutExtension(translatedPath) + "_fixed" + ext
+                    );
+
+                    SaveCorrectedImage(translated, newDpi, outPath, format);
+
+                    WriteLine($"\nСохранено: \"{outPath}\"");
+                    WriteLine($"DPI скорректирован: {newDpi:0.0} для совпадения с шириной оригинала ≈ {origWidthMm:0.00} мм");
                 }
-                else
-                {
-                    originalImage = img2;
-                    translatedImage = img1;
-                    originalPath = path2;
-                    translatedPath = path1;
-                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                WriteLine("\nОшибка: нет доступа к файлу. Запусти от имени администратора?");
+            }
+            catch (IOException ex)
+            {
+                WriteLine($"\nОшибка ввода-вывода: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                WriteLine($"\nНеизвестная ошибка: {ex.Message}");
+            }
 
-                // Исходные параметры
-                float origDpiX = originalImage.HorizontalResolution;
-                int origWidthPx = originalImage.Width;
-                int origHeightPx = originalImage.Height;
-                float origWidthMm = origWidthPx / origDpiX * 25.4f;
-                float origHeightMm = origHeightPx / origDpiX * 25.4f;
+            ReadLine();
+        }
 
-                float transDpiX = translatedImage.HorizontalResolution;
-                int transWidthPx = translatedImage.Width;
-                int transHeightPx = translatedImage.Height;
-                float transWidthMm = transWidthPx / transDpiX * 25.4f;
-                float transHeightMm = transHeightPx / transDpiX * 25.4f;
-
-                Console.WriteLine("\n Original image:");
-                Console.WriteLine($"DPI     = {origDpiX:0.0}");
-                Console.WriteLine($"Pixels  = {origWidthPx} x {origHeightPx}");
-                Console.WriteLine($"Physical size = {origWidthMm:0.00} × {origHeightMm:0.00} mm");
-
-                Console.WriteLine("\n Translated image:");
-                Console.WriteLine($"DPI     = {transDpiX:0.0}");
-                Console.WriteLine($"Pixels  = {transWidthPx} x {transHeightPx}");
-                Console.WriteLine($"Physical size = {transWidthMm:0.00} × {transHeightMm:0.00} mm");
-
-                // Расчёт нового DPI
-                float newDpi = origDpiX * transWidthPx / origWidthPx;
-
-                // Путь сохранения
-                string outDir = Path.GetDirectoryName(translatedPath);
-                string outName = Path.GetFileNameWithoutExtension(translatedPath) + "_fixed";
-                string outExt = ".png"; // Если важна точность и метаданные, лучше сохранять как PNG
-                string outputPath = Path.Combine(outDir, outName + outExt);
-
-                using (var outputBitmap = new Bitmap(translatedImage))
-                {
-                    outputBitmap.SetResolution(newDpi, newDpi);
-                    outputBitmap.Save(outputPath, ImageFormat.Png);
-                }
-
-                Console.WriteLine($"\n Сохранено исправленное изображение: \"{outputPath}\"");
-                Console.WriteLine($"DPI скорректирован: {newDpi:0.0}, физ. ширина ≈ {origWidthMm:0.00} мм");
-
-                Console.ReadLine();
+        static void SaveCorrectedImage(Image source, float newDpi, string outPath, ImageFormat format)
+        {
+            using (var output = new Bitmap(source))
+            {
+                output.SetResolution(newDpi, newDpi);
+                output.Save(outPath, format);
             }
         }
-        catch (Exception ex)
+
+        static float PixelsToMillimeters(int pixels, float dpi)
         {
-            Console.WriteLine($"\n Ошибка: {ex.Message}");
-            Console.ReadLine();
+            return pixels / dpi * 25.4f;
+        }
+
+        static void PrintImageInfo(float dpi, int width, int height, float widthMm, float heightMm)
+        {
+            WriteLine($"DPI:        {dpi:0.0}");
+            WriteLine($"Pixels:     {width} × {height}");
+            WriteLine($"Size (мм):  {widthMm:0.00} × {heightMm:0.00}");
         }
     }
 }
